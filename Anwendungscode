@@ -1,0 +1,1250 @@
+<!-- ---------------------------------------------------------------------
+    Hinweis zur Entwicklung:
+    Teile der Implementierung wurden mit Unterstützung integrierter Funktionen der Entwicklungsumgebung erstellt
+    Anschließend wurden diese eigenständig geprüft und angepasst
+    --------------------------------------------------------------------- -->
+
+<!DOCTYPE html>
+<html>
+<head>
+    <!-- ---------------------------------------------------------------------
+         Kartentitel wird festgelegt, wie er auch im Browser-Tab angezeigt wird
+         Seitentitel wird definiert & Zeichensatz (UTF-8 für Umlaute) festgelegt
+         --------------------------------------------------------------------- -->
+    <title>Deutsch-französischer Grenzraum im Wandel (1871–2026)</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- ---------------------------------------------------------------------
+         Leaflet-CSS: Korrekte Darstellung der Karte
+         --------------------------------------------------------------------- -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+
+    <!-- ---------------------------------------------------------------------
+         CSS-Style
+         Alle Styles für Karte, Time-Slider, Legende, Titel usw.
+         --------------------------------------------------------------------- -->
+    <style>
+        /* Grundeinstellungen: Entfernt die Standardränder und Innenabstände, die Scrollbar ist deaktiviert */
+        html, body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        /* Die Karte füllt die gesamte Fensterhöhe (100vh = 100% Viewport-Höhe) */
+        #map {
+            height: 100vh;
+            position: relative;
+        }
+
+        /* Time-Slider: Die Position ist fest am unteren Bildschirmrand zentriert, Farbe: weißer Hintergrund mit Schattierung */
+        .time-slider {
+            position: fixed;
+            left: 50%;
+            bottom: 20px;
+            transform: translateX(-50%); 
+            background-color: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            z-index: 1000;
+        }
+
+        /* Legende und Infoboxen: Einheitliche Darstellung mit weißem Hintergrund und Schattierung; entspricht für alle drei Zeitabschnitte*/
+        .legend-box {
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            line-height: 1.4;
+            font-size: 12px;
+        }
+
+        /* Einzelne Legendeneinträge: Einstellungen für die Anordnung von Farbfeld und Beschriftung */
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-top: 4px;
+        }
+
+        /* Farbfeld innerhalb der Legende */
+        .legend-swatch {
+            width: 12px;
+            height: 12px;
+            margin-right: 8px;
+            border: none;
+            flex: 0 0 12px;
+        }
+
+        /* Kartentitel: Position & visuelle Gestaltung */
+        .map-title {
+            background: rgba(255,255,255,0.9);
+            padding: 10px 18px;
+            border-radius: 5px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            text-align: center;
+            font-family: Arial, Helvetica, sans-serif;
+        }
+
+        /* Haupt- und Untertitel der Karte */
+        .map-title h1 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+        }
+        .map-title h2 {
+            margin: 4px 0 0 0;
+            font-size: 12px;
+            font-weight: normal;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <!-- ---------------------------------------------------------------------
+         Karten-Container:
+         Einbindung des HTML-Elements in die interaktive Leaflet-Karte
+         --------------------------------------------------------------------- -->
+    <div id="map"></div>
+
+    <!-- Leaflet-JavaScript-Bibliothek: Stellt die Kartenfunktionalität bereit -->
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+
+    <script>
+        // ---------------------------------------------------------------------
+        // Initialisierung der Leaflet-Karte
+        // Erstellung der Leaflet-Karte ohne Standard-Zoom-Steuerung
+        // Die Karte wird zentriert auf [48.6, 7.5], was ungefähr Oberrheingebiet entspricht
+        // ---------------------------------------------------------------------
+        const map = L.map('map', { zoomControl: false, maxZoom: 9 }).setView([48.6, 7.5], 7);
+
+        // ---------------------------------------------------------------------
+        // Die Basiskarte verwendet den hellen CARTO-Kartenstil als Hintergrund
+        // ---------------------------------------------------------------------
+        const baseLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+        }).addTo(map);
+
+        // ---------------------------------------------------------------------
+        // Kartentitel: Positionierung links oben
+        // Erstellt ein benutzerdefiniertes Leaflet-Control-Element mit Haupt- und Untertitel der Karte, ebenfalls oben links
+        // ---------------------------------------------------------------------
+        const titleControl = L.control({ position: 'topleft' });
+        titleControl.onAdd = function (map) {
+            const div = L.DomUtil.create('div', 'map-title');
+            div.innerHTML = `
+                <h1>Der deutsch-französische Grenzraum im historischen Wandel</h1>
+                <h2>Interaktive Analyse von Grenzverschiebung, Infrastruktur und Kooperation (1871–2026)</h2>
+            `;
+            return div;
+        };
+        titleControl.addTo(map);
+
+        // ---------------------------------------------------------------------
+        // TimeSlider: Insgesamt drei Positionen; 
+        // 1 = 1871, 2 = ca. 1900 & 3 = 2026
+        // ---------------------------------------------------------------------
+        const timeSlider = L.control({ position: 'bottomleft' });
+
+        timeSlider.onAdd = function (map) {
+            const div = L.DomUtil.create('div', 'time-slider');
+            div.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <input id="timeRange" type="range" min="1" max="3" step="1" value="1" style="width: 200px;">
+                    <label for="timeRange"><span id="timeLabel" style="display:inline-block;width:47px;text-align:center;">1</span></label>
+                </div>
+            `;
+            // Verhindert eine Interaktion mit dem TimeSlider mit der darunterliegenden Karte
+            L.DomEvent.disableClickPropagation(div);
+            return div;
+        };
+
+        timeSlider.addTo(map);
+
+        // ---------------------------------------------------------------------
+        // Slider und Zuordnung der Zeitpunkte
+        // Ordnet die Werte des SLiders den entsprechenden Zeitpunkten zu
+        // ---------------------------------------------------------------------
+        const timeRange = document.getElementById('timeRange');
+        const timeLabel = document.getElementById('timeLabel');
+        const zeitpunktLabels = {
+            1: '1871',
+            2: 'ca. 1900',
+            3: '2026'
+        };
+
+        // Initialisierung des TimeSliders (beim Laden der Seite = Zeitpunkt 1 = "1871")
+        timeLabel.textContent = zeitpunktLabels[parseInt(timeRange.value, 10)] || '1';
+
+        // ---------------------------------------------------------------------
+        // Layer-Variablen
+        // Definiert Variablen für Layer und Steuerelemente, die im weiteren Verlauf verwendet werden
+        // ---------------------------------------------------------------------
+
+        // --- Steuerelemente für die verschiedenen Zeitpunkte (Layer-Auswahl, Info, Legende) ---
+        let layerControl;
+        let zeitpunkt1InfoControl;
+        let zeitpunkt2InfoControl;
+        let zeitpunkt3InfoControl;
+        let zeitpunkt1LegendControl;
+        let zeitpunkt2LegendControl;
+        let zeitpunkt3LegendControl;
+
+        // --- GeoJSON-Layer (Polygone, Linien, Punkte) ---
+        let deutschlandLayer;
+        let elsassLayer;         
+        let elsass1871Layer;               // Choroplethenkarte
+        let deutschesReich1871Layer;       // Choroplethenkarte
+        let deutschesReich1900Layer;
+        let elsassLothringen1900Layer;
+        let grenze1900Layer;               // Linienlayer
+        let grenzbahnhoefe1900Layer;       // Punktlayer
+        let bahnnetzLayer;                 // Linienlayer
+        let rheinLayer;                    // dauerhaft sichtbar & Hierachie: oberste Ebene
+
+        // --- Toggle-Layer (Steuerung der Sichtbarkeit über Layer-Control für Zeitpunkt 1) ---
+        let elsass1871ToggleLayer;
+        let deutschesReich1871ToggleLayer;
+
+        // --- Zeitpunkt 3: Identitätsräume & Kooperationsachsen ---
+        let koordinatenMarkerLayer;
+        let zeitpunkt3LayerControl;
+        let koordinatenToggleLayer;
+        let kooperationsachsenLayer;
+        let kooperationsachsenToggleLayer;
+        let oberrheingrabenLayer;
+        let saarLorLuxLayer;
+
+        // ---------------------------------------------------------------------
+        // Farbedfinitionen für Identitätsräume
+        // Jeder Typ erhält eine eindeutige Farbe für die Darstellung in der Karte (Marker)
+        // ---------------------------------------------------------------------
+        const identityColors = {
+            'Europäisch-institutionell': '#e31a1c',  // Rot
+            'Transnational-alltäglich': '#33a02c',   // Grün
+            'Regional-kulturell': '#1f78b4'          // Blau
+        };
+
+        // ---------------------------------------------------------------------
+        // Koordinaten und Informationen zu den Städten für Zeitpunkt 3
+        // Enthalten sind: Name, Koordinaten, Typ und Pop-Up-Text
+        // ---------------------------------------------------------------------
+        const cities = [
+            {
+                name: 'Straßburg',
+                coords: [48.5839, 7.7455],
+                type: 'Europäisch-institutionell',
+                text: '• Staat: Frankreich<br>• Rolle: Sitz wichtiger EU-Institutionen<br>• Identität: Stark europäisch geprägt, aber weiterhin französisch eingebettet.'
+            },
+            {
+                name: 'Kehl',
+                coords: [48.5720, 7.8157],
+                type: 'Transnational-alltäglich',
+                text: '• Staat: Deutschland<br>• Rolle: Direkte Grenzstadt zu Straßburg<br>• Identität: Alltag stark grenzüberschreitend geprägt.'
+            },
+            {
+                name: 'Karlsruhe',
+                coords: [49.0069, 8.4037],
+                type: 'Transnational-alltäglich',
+                text: '• Staat: Deutschland<br>• Rolle: Sitz wichtiger nationaler Institutionen<br>• Identität: Vorwiegend national, mit europäischer Kooperation.'
+            },
+            {
+                name: 'Colmar',
+                coords: [48.0794, 7.3585],
+                type: 'Regional-kulturell',
+                text: '• Staat: Frankreich<br>• Rolle: Regionales Kulturzentrum im Elsass<br>• Identität: Stark regional geprägt.'
+            },
+            {
+                name: 'Metz',
+                coords: [49.1193, 6.1757],
+                type: 'Regional-kulturell',
+                text: '• Staat: Frankreich<br>• Rolle: Historisch mehrfacher Staatswechsel<br>• Identität: Großregional geprägt durch die Einbindung in die Großregion SaarLorLux.'
+            },
+            {
+                name: 'Saarbrücken',
+                coords: [49.2402, 6.9969],
+                type: 'Regional-kulturell',
+                text: '• Staat: Deutschland<br>• Rolle: Deutscher Knotenpunkt der Großregion SaarLorLux<br>• Identität: Großregional geprägt durch grenzüberschreitende Zusammenarbeit mit Lothringen, Luxemburg und Rheinland-Pfalz'
+            }
+        ];
+
+        // ---------------------------------------------------------------------
+        // CHOROPLETHENFARBSKALA (Stimmungsindex)
+        // Farbzuordnung basierend auf den Wert des Stimmungsindex (-3 bis +3)
+        // ---------------------------------------------------------------------
+        function getChoroplethFillColor(score) {
+            if (score === null || score === undefined || Number.isNaN(score)) return '#a4a8aa';
+            if (score <= -3) return '#B2182B';
+            if (score === -2) return '#D6604D';
+            if (score === -1) return '#F4A582';
+            if (score === 0) return '#dfcea1';
+            if (score === 1) return '#B8E186';
+            if (score === 2) return '#4DAC26';
+            return '#1B7837';
+        }
+
+        // ---------------------------------------------------------------------
+        // Wird keine aktive thematische Darstellung verwendet, wird ein neutraler Stil vorgegeben
+        // ---------------------------------------------------------------------
+        function getNeutralFeatureStyle() {
+            return {
+                color: '#a4a8aa',
+                weight: 1,
+                opacity: 1,
+                fillColor: '#FFFFFF',
+                fillOpacity: 0.5
+            };
+        }
+
+        // ---------------------------------------------------------------------
+        // Stimmungsindex für die Elsass Departements (1871)
+        // Zuordnung der Werte für die drei Departements
+        // ---------------------------------------------------------------------
+        const elsass1871ScoreByDepartment = {
+            'MEURTHE-ET-MOSELLE': -3,
+            'MEUSE': -3,
+            'VOSGES': -2
+        };
+
+        // ---------------------------------------------------------------------
+        // Darstellung: ELSASS 1871
+        // Legt fest, wie die Gebiete visuell dargestellt werden
+        // ---------------------------------------------------------------------
+        function applyElsass1871Style(isActive) {
+            if (!elsass1871Layer) return;
+
+            // Für jedes einzelne Feature (Departement) im Layer
+            elsass1871Layer.eachLayer(layer => {
+                if (!isActive) {
+                    layer.setStyle(getNeutralFeatureStyle());
+                    return;
+                }
+                const dep = String(layer.feature?.properties?.NOM_DEP || '').toUpperCase();
+                const score = Object.prototype.hasOwnProperty.call(elsass1871ScoreByDepartment, dep)
+                    ? elsass1871ScoreByDepartment[dep]
+                    : null;
+
+                // Choroplethenfarbstil anwenden
+                layer.setStyle({
+                    color: '#a4a8aa',
+                    weight: 1,
+                    opacity: 1,
+                    fillColor: getChoroplethFillColor(score),
+                    fillOpacity: 0.7
+                });
+            });
+        }
+
+        // ---------------------------------------------------------------------
+        // Darstellung: Deutsches Reich 1871
+        // Legt fest, wie die Gebiete visuell dargestellt werden
+        // ---------------------------------------------------------------------
+        function applyDeutschesReich1871Style(isActive) {
+            if (!deutschesReich1871Layer) return;
+
+            deutschesReich1871Layer.eachLayer(layer => {
+                if (!isActive) {
+                    layer.setStyle(getNeutralFeatureStyle());
+                    return;
+                }
+
+                const rawScore = layer.feature?.properties?.Stimmungsindex;
+                const score = typeof rawScore === 'number' ? rawScore : parseFloat(rawScore);
+
+                layer.setStyle({
+                    color: '#a4a8aa',
+                    weight: 1,
+                    opacity: 1,
+                    fillColor: getChoroplethFillColor(score),
+                    fillOpacity: 0.7
+                });
+            });
+        }
+
+        // ---------------------------------------------------------------------
+        // Darstellung von Zeitpunkt 1 aktualisieren
+        // Prüft, welche Layer aktiv sind und passt die Darstellung entsprechend an
+        // ---------------------------------------------------------------------
+        function syncZeitpunkt1StyleFromControl() {
+            const elsassActive = !!(elsass1871ToggleLayer && map.hasLayer(elsass1871ToggleLayer));
+            const reichActive = !!(deutschesReich1871ToggleLayer && map.hasLayer(deutschesReich1871ToggleLayer));
+
+            applyElsass1871Style(elsassActive);
+            applyDeutschesReich1871Style(reichActive);
+        }
+
+        // ---------------------------------------------------------------------
+        // Layer Zeitpunkt 1 (1871)
+        // Legt fest, welche Layer angezeigt werden und ausgewählt werden
+        // Die Grundstruktur dieser Funktion wurde unter Nutzung integrierter Funktionen der Entwicklungsumgebung erstellt und anschließend eigenständig angepasst
+        // ---------------------------------------------------------------------
+        function refreshZeitpunkt1LayerControl(zeitpunkt) {
+            if (layerControl) {
+                map.removeControl(layerControl);
+                layerControl = null;
+            }
+
+            if (zeitpunkt !== 1) {
+                if (elsass1871Layer && map.hasLayer(elsass1871Layer)) map.removeLayer(elsass1871Layer);
+                if (deutschesReich1871Layer && map.hasLayer(deutschesReich1871Layer)) map.removeLayer(deutschesReich1871Layer);
+                if (elsass1871ToggleLayer && map.hasLayer(elsass1871ToggleLayer)) map.removeLayer(elsass1871ToggleLayer);
+                if (deutschesReich1871ToggleLayer && map.hasLayer(deutschesReich1871ToggleLayer)) map.removeLayer(deutschesReich1871ToggleLayer);
+                if (grenze1900Layer && map.hasLayer(grenze1900Layer)) map.removeLayer(grenze1900Layer);
+                if (rheinLayer) rheinLayer.bringToFront(); // Rhein immer ganz oben halten
+                return;
+            }
+
+            // Zeitpunkt 1:Layer hinzufügen (falls noch nicht aktiv ist)
+            if (elsass1871Layer && !map.hasLayer(elsass1871Layer)) map.addLayer(elsass1871Layer);
+            if (deutschesReich1871Layer && !map.hasLayer(deutschesReich1871Layer)) map.addLayer(deutschesReich1871Layer);
+            if (grenze1900Layer && !map.hasLayer(grenze1900Layer)) map.addLayer(grenze1900Layer);
+
+            // Toggle-Layer als Grundlage für die Auswahl erstellen 
+            if (!elsass1871ToggleLayer) elsass1871ToggleLayer = L.layerGroup();
+            if (!deutschesReich1871ToggleLayer) deutschesReich1871ToggleLayer = L.layerGroup();
+
+            // Toggle-Layer initial deaktivieren (Checkboxen sind nicht angehakt)
+            if (map.hasLayer(elsass1871ToggleLayer)) map.removeLayer(elsass1871ToggleLayer);
+            if (map.hasLayer(deutschesReich1871ToggleLayer)) map.removeLayer(deutschesReich1871ToggleLayer);
+
+            // Einträge für die Layer-Auswahl definieren
+            const overlays = {};
+
+            if (elsass1871Layer) {
+                overlays['Elsass 1871'] = elsass1871ToggleLayer;
+            }
+
+            if (deutschesReich1871Layer) {
+                overlays['Deutsches Reich 1871'] = deutschesReich1871ToggleLayer;
+            }
+
+            // Layer-Control erstellen: Positionierung oben rechts
+            layerControl = L.control.layers(null, overlays, {
+                position: 'topright',
+                collapsed: false
+            }).addTo(map);
+
+            // Darstellung wird entsprechend der Auswahl aktualisiert
+            syncZeitpunkt1StyleFromControl();
+
+            // Hierachie definiert: Rhein immer im Vordergrund und die anderen Layer darunter
+            if (grenze1900Layer) grenze1900Layer.bringToFront();
+            if (rheinLayer) rheinLayer.bringToFront();
+        }
+
+        // ---------------------------------------------------------------------
+        // Darstellung von Zeitpunkt 3 aktualisieren
+        // Passt die angezeigten Layer an die aktuelle Auswahl an
+        // Die Grundstru
+        // ---------------------------------------------------------------------
+        function syncZeitpunkt3LayersFromControl() {
+            const koordinatenActive = !!(koordinatenToggleLayer && map.hasLayer(koordinatenToggleLayer));
+            const achsenActive = !!(kooperationsachsenToggleLayer && map.hasLayer(kooperationsachsenToggleLayer));
+
+            // Identitätsräume ein-/ausblenden
+            if (koordinatenMarkerLayer) {
+                if (koordinatenActive && !map.hasLayer(koordinatenMarkerLayer)) map.addLayer(koordinatenMarkerLayer);
+                if (!koordinatenActive && map.hasLayer(koordinatenMarkerLayer)) map.removeLayer(koordinatenMarkerLayer);
+            }
+
+            // Flächen und Linien der Kooperationsachsen ein-/ausblenden
+            if (oberrheingrabenLayer) {
+                if (achsenActive && !map.hasLayer(oberrheingrabenLayer)) map.addLayer(oberrheingrabenLayer);
+                if (!achsenActive && map.hasLayer(oberrheingrabenLayer)) map.removeLayer(oberrheingrabenLayer);
+            }
+
+            if (saarLorLuxLayer) {
+                if (achsenActive && !map.hasLayer(saarLorLuxLayer)) map.addLayer(saarLorLuxLayer);
+                if (!achsenActive && map.hasLayer(saarLorLuxLayer)) map.removeLayer(saarLorLuxLayer);
+            }
+
+            if (kooperationsachsenLayer) {
+                if (achsenActive && !map.hasLayer(kooperationsachsenLayer)) map.addLayer(kooperationsachsenLayer);
+                if (!achsenActive && map.hasLayer(kooperationsachsenLayer)) map.removeLayer(kooperationsachsenLayer);
+            }
+
+            // Rhein immer im Vordergrund halten
+            if (rheinLayer) rheinLayer.bringToFront();
+        }
+
+        // ---------------------------------------------------------------------
+        // Layer Zeitpunkt 3 (2026)
+        // Legt fest, welche Layer angezeigt werden und wie die Layer ausgewählt werden
+        // ---------------------------------------------------------------------
+        function refreshZeitpunkt3LayerControl(zeitpunkt) {
+            // Bestehende Layer-Auswahl entfernen
+            if (zeitpunkt3LayerControl) {
+                map.removeControl(zeitpunkt3LayerControl);
+                zeitpunkt3LayerControl = null;
+            }
+
+            // Wenn nicht Zeitpunkt 3: Alle zugehörigen Layer entfernen
+            if (zeitpunkt !== 3) {
+                if (deutschlandLayer && map.hasLayer(deutschlandLayer)) map.removeLayer(deutschlandLayer);
+                if (elsassLayer && map.hasLayer(elsassLayer)) map.removeLayer(elsassLayer);
+                if (koordinatenMarkerLayer && map.hasLayer(koordinatenMarkerLayer)) map.removeLayer(koordinatenMarkerLayer);
+                if (kooperationsachsenLayer && map.hasLayer(kooperationsachsenLayer)) map.removeLayer(kooperationsachsenLayer);
+                if (oberrheingrabenLayer && map.hasLayer(oberrheingrabenLayer)) map.removeLayer(oberrheingrabenLayer);
+                if (saarLorLuxLayer && map.hasLayer(saarLorLuxLayer)) map.removeLayer(saarLorLuxLayer);
+                if (koordinatenToggleLayer && map.hasLayer(koordinatenToggleLayer)) map.removeLayer(koordinatenToggleLayer);
+                if (kooperationsachsenToggleLayer && map.hasLayer(kooperationsachsenToggleLayer)) map.removeLayer(kooperationsachsenToggleLayer);
+                if (rheinLayer) rheinLayer.bringToFront();
+                return;
+            }
+
+            // Hintergrund-Layer anzeigen
+            if (deutschlandLayer && !map.hasLayer(deutschlandLayer)) map.addLayer(deutschlandLayer);
+            if (elsassLayer && !map.hasLayer(elsassLayer)) map.addLayer(elsassLayer);
+
+            // Toggle-Layer erstellen (falls noch nicht vorhanden)
+            if (!koordinatenToggleLayer) koordinatenToggleLayer = L.layerGroup();
+            if (!kooperationsachsenToggleLayer) kooperationsachsenToggleLayer = L.layerGroup();
+
+            // Standardzustand festgelegt
+            if (!map.hasLayer(koordinatenToggleLayer)) map.addLayer(koordinatenToggleLayer);
+            if (map.hasLayer(kooperationsachsenToggleLayer)) map.removeLayer(kooperationsachsenToggleLayer);
+
+            // Einträge für die Layer-Auswahl definieren
+            const overlays = {};
+            if (koordinatenMarkerLayer) overlays['Identit\u00e4tsr\u00e4ume'] = koordinatenToggleLayer;
+            if (kooperationsachsenLayer) overlays['Kooperationsachsen'] = kooperationsachsenToggleLayer;
+
+            // Layer-Control definieren; Positionierung oben rechts
+            zeitpunkt3LayerControl = L.control.layers(null, overlays, {
+                position: 'topright',
+                collapsed: false
+            }).addTo(map);
+
+            // Darstellung entsprechend der Auswahl aktualisieren
+            syncZeitpunkt3LayersFromControl();
+
+            if (rheinLayer) rheinLayer.bringToFront();
+        }
+
+        // ---------------------------------------------------------------------
+        // Layer Zeitpunkt 2 (ca. 1900)
+        // Blendet die zugehörigen Layer ein oder aus
+        // ---------------------------------------------------------------------
+        function refreshZeitpunkt2Layers(zeitpunkt) {
+            const show1900Layers = zeitpunkt === 2; // Nur bei Zeitpunkt 2 anzeigen
+
+            // Deutsches Reich 1900
+            if (deutschesReich1900Layer) {
+                if (show1900Layers && !map.hasLayer(deutschesReich1900Layer)) map.addLayer(deutschesReich1900Layer);
+                if (!show1900Layers && map.hasLayer(deutschesReich1900Layer)) map.removeLayer(deutschesReich1900Layer);
+            }
+
+            // Elsass-Lothringen 1900
+            if (elsassLothringen1900Layer) {
+                if (show1900Layers && !map.hasLayer(elsassLothringen1900Layer)) map.addLayer(elsassLothringen1900Layer);
+                if (!show1900Layers && map.hasLayer(elsassLothringen1900Layer)) map.removeLayer(elsassLothringen1900Layer);
+            }
+
+            // Staatsgrenze 1900: Wird auch bei Zeitpunkt 1 angezeigt
+            if (grenze1900Layer) {
+                if ((show1900Layers || zeitpunkt === 1) && !map.hasLayer(grenze1900Layer)) map.addLayer(grenze1900Layer);
+                if (!show1900Layers && zeitpunkt !== 1 && map.hasLayer(grenze1900Layer)) map.removeLayer(grenze1900Layer);
+            }
+
+            // Grenzbahnhöfe 1900
+            if (grenzbahnhoefe1900Layer) {
+                if (show1900Layers && !map.hasLayer(grenzbahnhoefe1900Layer)) map.addLayer(grenzbahnhoefe1900Layer);
+                if (!show1900Layers && map.hasLayer(grenzbahnhoefe1900Layer)) map.removeLayer(grenzbahnhoefe1900Layer);
+            }
+
+            // Bahnnetz
+            if (bahnnetzLayer) {
+                if (show1900Layers && !map.hasLayer(bahnnetzLayer)) map.addLayer(bahnnetzLayer);
+                if (!show1900Layers && map.hasLayer(bahnnetzLayer)) map.removeLayer(bahnnetzLayer);
+            }
+
+            // Rhein immer im Vordergrund
+            if (rheinLayer) rheinLayer.bringToFront();
+        }
+
+        // ---------------------------------------------------------------------
+        // Infobox für Zeitpunkt 1 (1871)
+        // ---------------------------------------------------------------------
+        function refreshZeitpunkt1InfoBox(zeitpunkt) {
+            // Bestehende Infobox entfernen
+            if (zeitpunkt1InfoControl) {
+                map.removeControl(zeitpunkt1InfoControl);
+                zeitpunkt1InfoControl = null;
+            }
+
+            // Nur bei Zeitpunkt 1 anzeigen
+            if (zeitpunkt !== 1) return;
+
+            zeitpunkt1InfoControl = L.control({ position: 'topleft' });
+            zeitpunkt1InfoControl.onAdd = function () {
+                const div = L.DomUtil.create('div', 'legend-box');
+                div.innerHTML =
+                    '<strong style="font-size:14px;">1871 – Grenze als politische Trennlinie</strong>' +
+                    '<div style="margin-top:4px;"><strong>Annexion und Grenzverschiebung</strong></div>' +
+                    '<div style="margin-top:4px;">Nach dem Deutsch-Französischen Krieg wird Elsass-Lothringen Teil des Deutschen Reiches.<br>Die neue Staatsgrenze verläuft nun entlang des Rheins und schafft eine klare politische Trennung zwischen beiden Staaten.</div>' +
+                    '<div style="margin-top:8px;">Der Stimmungsindex zeigt deutliche regionale Unterschiede in der Haltung zur Annexion.<br>Der Grenzraum wird damit zu einer politisch geprägten Konfliktzone, in der nationale Zugehörigkeit stark umstritten ist.</div>';
+
+                L.DomEvent.disableClickPropagation(div);
+                return div;
+            };
+
+            zeitpunkt1InfoControl.addTo(map);
+        }
+
+        // ---------------------------------------------------------------------
+        // Infobox für Zeitpunkt 2 (ca. 1900)
+        // ---------------------------------------------------------------------
+        function refreshZeitpunkt2InfoBox(zeitpunkt) {
+            if (zeitpunkt2InfoControl) {
+                map.removeControl(zeitpunkt2InfoControl);
+                zeitpunkt2InfoControl = null;
+            }
+
+            if (zeitpunkt !== 2) return;
+
+            zeitpunkt2InfoControl = L.control({ position: 'topleft' });
+            zeitpunkt2InfoControl.onAdd = function () {
+                const div = L.DomUtil.create('div', 'legend-box');
+                div.innerHTML =
+                    '<strong style="font-size:14px;">ca. 1900 – Infrastruktur im Grenzraum</strong>' +
+                    '<div style="margin-top:4px;"><strong>Bahnhöfe im Grenzbereich</strong></div>' +
+                    '<div style="margin-top:4px;">Um 1900 verdichtet sich das Eisenbahnnetz im deutsch-französischen Grenzraum deutlich.<br>Neue Bahnhöfe und Bahnlinien verbinden wichtige Städte entlang der Staatsgrenze.</div>' +
+                    '<div style="margin-top:8px;">Die Infrastruktur stärkt Verkehr und wirtschaftliche Verflechtungen im Grenzraum.<br>Trotz dieser Verbindungen bleibt die politische Grenze weiterhin bestehen und strukturiert den Raum.</div>';
+                L.DomEvent.disableClickPropagation(div);
+                return div;
+            };
+
+            zeitpunkt2InfoControl.addTo(map);
+        }
+
+        // ---------------------------------------------------------------------
+        // Infobox für Zeitpunkt 3 (2026)
+        // ---------------------------------------------------------------------
+        function refreshZeitpunkt3InfoBox(zeitpunkt) {
+            if (zeitpunkt3InfoControl) {
+                map.removeControl(zeitpunkt3InfoControl);
+                zeitpunkt3InfoControl = null;
+            }
+
+            if (zeitpunkt !== 3) return;
+
+            zeitpunkt3InfoControl = L.control({ position: 'topleft' });
+            zeitpunkt3InfoControl.onAdd = function () {
+                const div = L.DomUtil.create('div', 'legend-box');
+                div.innerHTML =
+                    '<strong style="font-size:14px;">2026 – Kooperation und Identitätsräume</strong>' +
+                    '<div style="margin-top:4px;"><strong>Identitätsräume im heutigen Grenzverlauf</strong></div>' +
+                    '<div style="margin-top:4px;">Nach mehreren Grenzverschiebungen verläuft die Staatsgrenze heute erneut entlang des Rheins.<br>Im Grenzraum überlagern sich nationale, regionale und europäische Bezüge.</div>' +
+                    '<div style="margin-top:8px;">Grenzüberschreitende Kooperationen und institutionelle Netzwerke prägen den Alltag vieler Städte.<br>Der Raum wird zunehmend durch transnationale Identitätsräume und funktionale Verflechtungen bestimmt.</div>';
+                L.DomEvent.disableClickPropagation(div);
+                return div;
+            };
+
+            zeitpunkt3InfoControl.addTo(map);
+        }
+
+        // ---------------------------------------------------------------------
+        // Legende für Zeitpunkt 1 (1871)
+        // Zeigt die Farbskala des Stimmungsindex sowie weitere Kartenelemente
+        // ---------------------------------------------------------------------
+        function refreshZeitpunkt1Legend(zeitpunkt) {
+            // Bestehende Legende entfernen
+            if (zeitpunkt1LegendControl) {
+                map.removeControl(zeitpunkt1LegendControl);
+                zeitpunkt1LegendControl = null;
+            }
+
+            if (zeitpunkt !== 1) return;
+
+            zeitpunkt1LegendControl = L.control({ position: 'bottomleft' });
+            zeitpunkt1LegendControl.onAdd = function () {
+                const div = L.DomUtil.create('div', 'legend-box');
+                div.innerHTML =
+                    // Überschrift der Legende
+                    '<strong>Stimmungsindex der Bevölkerung (1871)</strong>' +
+                    // Farbskala von starker Ablehnung (-3) bis starker Zustimmung (+3)
+                    '<div class="legend-item"><span class="legend-swatch" style="background:#B2182B"></span>-3 (starke Ablehnung)</div>' +
+                    '<div class="legend-item"><span class="legend-swatch" style="background:#D6604D"></span>-2 (Ablehnung)</div>' +
+                    '<div class="legend-item"><span class="legend-swatch" style="background:#F4A582"></span>-1 (leichte Ablehnung)</div>' +
+                    '<div class="legend-item"><span class="legend-swatch" style="background:#dfcea1"></span>0 (neutral)</div>' +
+                    '<div class="legend-item"><span class="legend-swatch" style="background:#B8E186"></span>1 (leichte Zustimmung)</div>' +
+                    '<div class="legend-item"><span class="legend-swatch" style="background:#4DAC26"></span>2 (Zustimmung)</div>' +
+                    '<div class="legend-item"><span class="legend-swatch" style="background:#1B7837"></span>3 (starke Zustimmung)</div>' +
+                    '<hr style="margin:8px 0">' +
+                    // Zusätzliche Kartenelemente: Liniensymbole für Grenze und Rhein
+                    '<strong>Weitere Kartenelemente</strong>' +
+                    '<div class="legend-item"><span style="display:inline-block;width:20px;height:3px;background:#555555;margin-right:8px;vertical-align:middle;flex:0 0 20px"></span>Staatsgrenze</div>' +
+                    '<div class="legend-item"><span style="display:inline-block;width:20px;height:2px;background:#1a5276;margin-right:8px;vertical-align:middle;flex:0 0 20px"></span>Rhein</div>';
+                L.DomEvent.disableClickPropagation(div);
+                return div;
+            };
+
+            zeitpunkt1LegendControl.addTo(map);
+        }
+
+        // ---------------------------------------------------------------------
+        // Legende für Zeitpunkt 2 (ca. 1900)
+        // Zeigt die verwendeten Symbole, für Infrasturktur und Grenze
+        // ---------------------------------------------------------------------
+        function refreshZeitpunkt2Legend(zeitpunkt) {
+            if (zeitpunkt2LegendControl) {
+                map.removeControl(zeitpunkt2LegendControl);
+                zeitpunkt2LegendControl = null;
+            }
+
+            if (zeitpunkt !== 2) return;
+
+            zeitpunkt2LegendControl = L.control({ position: 'bottomleft' });
+            zeitpunkt2LegendControl.onAdd = function () {
+                const div = L.DomUtil.create('div', 'legend-box');
+                div.innerHTML =
+                    '<strong>Bahnhöfe im Grenzraum (ca. 1900)</strong>' +
+                    // Liniensymbol: Staatsgrenze
+                    '<div class="legend-item"><span style="display:inline-block;width:20px;height:3px;background:#555555;margin-right:8px;vertical-align:middle;flex:0 0 20px"></span>Staatsgrenze</div>' +
+                    // Liniensymbol: Bahnnetz
+                    '<div class="legend-item"><span style="display:inline-block;width:20px;height:2px;background:#888888;margin-right:8px;vertical-align:middle;flex:0 0 20px"></span>Bahnnetz</div>' +
+                    // Punktsymbol: Grenzbahnhof
+                    '<div class="legend-item"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#66c2a4;margin-right:8px;flex:0 0 12px"></span>Grenzbahnhof</div>' +
+                    // Punktsymbol: Verkehrszentrum
+                    '<div class="legend-item"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#A80000;margin-right:8px;flex:0 0 12px"></span>Verkehrszentrum</div>' +
+                    // Liniensymbol: Rhein
+                    '<div class="legend-item"><span style="display:inline-block;width:20px;height:2px;background:#1a5276;margin-right:8px;vertical-align:middle;flex:0 0 20px"></span>Rhein</div>';
+                L.DomEvent.disableClickPropagation(div);
+                return div;
+            };
+
+            zeitpunkt2LegendControl.addTo(map);
+        }
+
+        // ---------------------------------------------------------------------
+        // Legende für Zeitpunkt 3 (2026)
+        // Passt die angezeigten Legendeninhalte an
+        // Dynamische Legende, da unterschiedliche Layer ein- und ausgeblendet werden können
+        // ---------------------------------------------------------------------
+        function refreshZeitpunkt3Legend(zeitpunkt) {
+            if (zeitpunkt3LegendControl) {
+                map.removeControl(zeitpunkt3LegendControl);
+                zeitpunkt3LegendControl = null;
+            }
+
+            if (zeitpunkt !== 3) return;
+
+            // Aktuellen Zustand prüfen
+            const koordinatenActive = !!(koordinatenToggleLayer && map.hasLayer(koordinatenToggleLayer));
+            const achsenActive = !!(kooperationsachsenToggleLayer && map.hasLayer(kooperationsachsenToggleLayer));
+
+            zeitpunkt3LegendControl = L.control({ position: 'bottomleft' });
+            zeitpunkt3LegendControl.onAdd = function () {
+                const div = L.DomUtil.create('div', 'legend-box');
+                let html = '';
+
+                if (koordinatenActive) {
+                    html += '<strong>Identitätsräume im deutsch-französischen Grenzraum (2026)</strong>' +
+                        '<div class="legend-item"><span class="legend-swatch" style="background:' + identityColors['Europäisch-institutionell'] + '"></span>Europäisch-institutionell</div>' +
+                        '<div class="legend-item"><span class="legend-swatch" style="background:' + identityColors['Transnational-alltäglich'] + '"></span>Transnational-alltäglich</div>' +
+                        '<div class="legend-item"><span class="legend-swatch" style="background:' + identityColors['Regional-kulturell'] + '"></span>Regional-kulturell</div>';
+                }
+
+                if (achsenActive) {
+                    // Trennlinie, falls beide Abschnitte sichtbar
+                    if (koordinatenActive) html += '<hr style="margin:8px 0">';
+                    html += '<strong>Kooperationsachsen</strong>' +
+                        '<div class="legend-item"><span class="legend-swatch" style="background:#555555"></span>Verbindungslinie</div>' +
+                        '<div class="legend-item"><span class="legend-swatch" style="background:#fe9929"></span>Oberrheingraben</div>' +
+                        '<div class="legend-item"><span class="legend-swatch" style="background:#fb6a4a"></span>SaarLorLux-Region</div>';
+                }
+
+                if (!koordinatenActive && !achsenActive) {
+                    html = '<strong>2026 – Gegenwart</strong><div style="margin-top:4px;">Bitte einen Layer aktivieren.</div>';
+                }
+
+                // Rhein-Symbol (nur wenn mindestens ein Layer aktiv)
+                if (koordinatenActive || achsenActive) {
+                    html += '<hr style="margin:8px 0">' +
+                        '<strong>Weitere Kartenelemente</strong>' +
+                        '<div class="legend-item"><span style="display:inline-block;width:20px;height:2px;background:#1a5276;margin-right:8px;vertical-align:middle;flex:0 0 20px"></span>Rhein</div>';
+                }
+
+                div.innerHTML = html;
+                L.DomEvent.disableClickPropagation(div);
+                return div;
+            };
+
+            zeitpunkt3LegendControl.addTo(map);
+        }
+
+        // ---------------------------------------------------------------------
+        // Marker und Linien für Zeitpunkt 3 (2026)
+        // Erstellt die Marker für die Identitätsräume und die Linien für die Kooperationsachsen
+        // Die Grundstruktur dieser Funktion wurde unter Nutzung integrierter Funktionen der Entwicklungsumgebung erstellt und anschließend eigenständig angepasst
+        // ---------------------------------------------------------------------
+        function loadKoordinatenMarkers() {
+            // Marker für die Städte werden erstellt
+            const markers = cities.map(city => {
+                // Straßburg und Karlsruhe bekommen einen größeren Marker, da beide Städte wichtige Knotenpunkte sind
+                let markerRadius = 10;
+                if (city.name === 'Straßburg' || city.name === 'Karlsruhe') {
+                    markerRadius = 14;
+                }
+
+                // Farbe wird basierend auf dem Identitätsraum-Typ zugewiesen
+                return L.circleMarker(city.coords, {
+                    radius: markerRadius,
+                    fillColor: identityColors[city.type],
+                    color: identityColors[city.type],
+                    weight: 0,
+                    fillOpacity: 0.85
+                }).bindPopup(
+                    // Popup-Inhalt: Stadtname, Identitätsraum-Typ und Infotext
+                    '<b>' + city.name + ' (2026)</b><br><br>' +
+                    '<b>Identitätsraum-Typ:</b> ' + city.type + '<br><br>' +
+                    city.text
+                );
+            });
+
+            // Die Marker werden in einer Gruppe zusammengefasst
+            koordinatenMarkerLayer = L.layerGroup(markers);
+
+            // Kooperationsachsen zwischen den Städten werden definiert
+            const achsen = [
+                { from: [49.0069, 8.4037], to: [48.5839, 7.7455], label: 'Karlsruhe \u2013 Stra\u00dfburg',
+                  info: '<b>Oberrhein-Kooperationsachse</b><br>• Grenz\u00fcberschreitende Verwaltungskooperation<br>• INTERREG-Programme / EU-F\u00f6rderprojekte<br>• Wissenschaft &amp; Hochschulnetzwerke<br>• Justizielle Institutionen (u.a. europ\u00e4ische Bez\u00fcge)' },
+                { from: [49.0069, 8.4037], to: [48.5720, 7.8157], label: 'Karlsruhe \u2013 Kehl',
+                  info: '<b>Infrastrukturelle Anbindung</b><br>• Verkehrsknoten Oberrhein<br>• Wirtschaftsverflechtung<br>• Regionalplanung Baden\u2013Elsass' },
+                { from: [48.5839, 7.7455], to: [48.5720, 7.8157], label: 'Stra\u00dfburg \u2013 Kehl',
+                  info: '<b>Unmittelbarer Grenzraum</b><br>• Allt\u00e4glicher Grenzverkehr<br>• Gemeinsame Stadtentwicklung<br>• Tram-Verbindung \u00fcber den Rhein<br>• Arbeitsmarkt- und Bildungsbeziehungen' },
+                { from: [48.5839, 7.7455], to: [48.0794, 7.3585], label: 'Stra\u00dfburg \u2013 Colmar',
+                  info: '<b>Els\u00e4ssische Achse</b><br>• Regionale Wirtschaftsstruktur<br>• Tourismus- und Kulturlandschaft<br>• Verwaltung im Rahmen Grand Est' },
+                { from: [49.2402, 6.9969], to: [49.1193, 6.1757], label: 'Saarbr\u00fccken \u2013 Metz',
+                  info: '<b>Gro\u00dfregion SaarLorLux</b><br>• Grenz\u00fcberschreitender Arbeitsmarkt<br>• Industrie- und Energieraum<br>• Politische Kooperation Gro\u00dfregion<br>• Historisch gepr\u00e4gte Verflechtungen' }
+            ];
+
+            const achsenElements = [];
+            const achsenMarkerCoords = {};
+
+            // Verbindungslinie wird erstellt und Endpunkt-Koordinaten merken
+            achsen.forEach(a => {
+                // Polyline = Verbindungslinie zwischen den beiden Städten
+                achsenElements.push(L.polyline([a.from, a.to], {
+                    color: '#555555',
+                    weight: 1.5,
+                    opacity: 0.6
+                }).bindPopup('<strong>' + a.label + '</strong><br><br>' + a.info));
+
+                // Endpunkt speichern; nur einmal pro Stadt
+                achsenMarkerCoords[a.from.toString()] = a.from;
+                achsenMarkerCoords[a.to.toString()] = a.to;
+            });
+
+            // Pro Stadt einen Marker erstellen und setzen
+            Object.values(achsenMarkerCoords).forEach(coord => {
+                // Marker zur passenden Stadt suchen
+                const city = cities.find(c => c.coords[0] === coord[0] && c.coords[1] === coord[1]);
+                if (city) {
+                    achsenElements.push(L.circleMarker(coord, {
+                        radius: 6,
+                        fillColor: '#4F4F4F',
+                        color: '#4F4F4F',
+                        weight: 1,
+                        fillOpacity: 0.8
+                    }).bindPopup('<b>' + city.name + '</b>'));
+                }
+            });
+
+            // Alle Achsen-Elemente in einer LayerGroup zusammenfassen
+            kooperationsachsenLayer = L.layerGroup(achsenElements);
+
+            // Layer-Kontrolle für Zeitpunkt 3 aktualisieren
+            refreshZeitpunkt3LayerControl(parseInt(timeRange.value, 10));
+            if (rheinLayer) rheinLayer.bringToFront();
+
+            // Konsolenausgabe zur Überprüfung
+            console.log('Identitätsraum-Marker geladen:', markers.length);
+            console.log('Kooperationsachsen geladen:', achsenElements.length);
+        }
+
+        // ---------------------------------------------------------------------
+        // TimeSlider
+        // Sowohl das Label als auch die angezeigten Layer, Infoboxen und Legenden werden je nach Zeitpunkt aktualisiert
+        // ---------------------------------------------------------------------
+        timeRange.addEventListener('input', function () {
+            const zeitpunkt = parseInt(this.value, 10);
+            timeLabel.textContent = zeitpunktLabels[zeitpunkt] || zeitpunkt;
+            console.log('Wechsel zu Zeitpunkt:', zeitpunkt);
+
+            refreshZeitpunkt1LayerControl(zeitpunkt);
+            refreshZeitpunkt2Layers(zeitpunkt);
+            refreshZeitpunkt3LayerControl(zeitpunkt);
+            refreshZeitpunkt1InfoBox(zeitpunkt);
+            refreshZeitpunkt2InfoBox(zeitpunkt);
+            refreshZeitpunkt3InfoBox(zeitpunkt);
+            refreshZeitpunkt1Legend(zeitpunkt);
+            refreshZeitpunkt2Legend(zeitpunkt);
+            refreshZeitpunkt3Legend(zeitpunkt);
+        });
+
+        // ---------------------------------------------------------------------
+        // Layer Auswahl
+        // Ein- und Ausblenden der Layer anhand des Layer-Controls, passt dementsprechend die Darstellung und Legende an
+        // ---------------------------------------------------------------------
+        map.on('overlayadd overlayremove', function (event) {
+            const zeitpunkt = parseInt(timeRange.value, 10);
+
+            if (zeitpunkt === 1) {
+                if (event.layer === elsass1871ToggleLayer || event.layer === deutschesReich1871ToggleLayer) {
+                    syncZeitpunkt1StyleFromControl();
+                    if (rheinLayer) rheinLayer.bringToFront();
+                }
+            }
+
+            if (zeitpunkt === 3) {
+                if (event.layer === koordinatenToggleLayer || event.layer === kooperationsachsenToggleLayer) {
+                    syncZeitpunkt3LayersFromControl();
+                    refreshZeitpunkt3Legend(3);
+                    if (rheinLayer) rheinLayer.bringToFront();
+                }
+            }
+        });
+
+        // ---------------------------------------------------------------------
+        // Maßstab: Fügt einen Maßstab zur Orientierung ein; Positionierung: unten rechts
+        // ---------------------------------------------------------------------
+        L.control.scale({
+            position: 'bottomright',
+            metric: true,
+            imperial: false
+        }).addTo(map);
+
+        // ---------------------------------------------------------------------
+        // GeoJSON-Layer werden geladen
+        // Die GeoJSON-Daten werden geladen und als Layer der Karte hinzugefügt
+        // Je nach Zeitpunkt werden die dazugehörigen Layer angezeigt bzw. ausgeblendet
+        // ---------------------------------------------------------------------
+        function loadLayers() {
+
+            // -----------------------------------------------------------------
+            // Darstellung für Deutschland (Zeitpunkt 3)
+            // Neutraler Stil in der Darstellung
+            // Die Struktur basiert auf einem wiederkehrenden Muster für das Laden und Einbinden von GeoJSON-Daten
+            // Dieses Muster wurde unter Nutzung integrierter Funktionen der Entwicklungsumgebung im Rahmen der Entwicklung erstellt und auf weitere Layer eigenständig angepasst
+            // -----------------------------------------------------------------
+            fetch('deutschland.json')
+                .then(response => response.json())
+                .then(data => {
+                    deutschlandLayer = L.geoJSON(data, {
+                        style: {
+                            color: '#a4a8aa',
+                            weight: 1,
+                            opacity: 1,
+                            fillColor: '#FFFFFF',
+                            fillOpacity: 0.5
+                        }
+                    }).addTo(map);
+                    // Anzeige aktualisieren
+                    refreshZeitpunkt3LayerControl(parseInt(timeRange.value, 10));
+                    refreshZeitpunkt2Layers(parseInt(timeRange.value, 10));
+                    if (rheinLayer) rheinLayer.bringToFront();
+                    console.log('Deutschland GeoJSON geladen');
+                })
+                .catch(error => console.error('Fehler beim Laden der Deutschland-Daten:', error));
+
+            // -----------------------------------------------------------------
+            // Darstellung für Elsass (für Zeitpunkt 3)
+            // Gleicher Stil wie Deutschland
+            // -----------------------------------------------------------------
+            fetch('elsass.json')
+                .then(response => response.json())
+                .then(data => {
+                    elsassLayer = L.geoJSON(data, {
+                        style: {
+                            color: '#a4a8aa',
+                            weight: 1,
+                            opacity: 1,
+                            fillColor: '#FFFFFF',
+                            fillOpacity: 0.5
+                        }
+                    }).addTo(map);
+                    refreshZeitpunkt3LayerControl(parseInt(timeRange.value, 10));
+                    refreshZeitpunkt2Layers(parseInt(timeRange.value, 10));
+                    if (rheinLayer) rheinLayer.bringToFront();
+                    console.log('Elsass GeoJSON geladen');
+                })
+                .catch(error => console.error('Fehler beim Laden der Elsass-Daten:', error));
+
+            // -----------------------------------------------------------------
+            // Darstellung für Elsass 1871 (Zeitpunkt 1)
+            // Darstellung mit Pop-Ups zu Name und Stimmungsindex
+            // -----------------------------------------------------------------
+            fetch('elsass_1871.geojson')
+                .then(response => response.json())
+                .then(data => {
+                    elsass1871Layer = L.geoJSON(data, {
+                        style: getNeutralFeatureStyle(),
+                        onEachFeature: (feature, layer) => {
+                            // Name und Stimmungsindex ermitteln
+                            const dep = feature?.properties?.NOM_DEP || 'Unbekannt';
+                            const key = String(dep).toUpperCase();
+                            const score = Object.prototype.hasOwnProperty.call(elsass1871ScoreByDepartment, key)
+                                ? elsass1871ScoreByDepartment[key]
+                                : 'k.A.';
+                            layer.bindPopup('<strong>' + dep + '</strong><br>Stimmungsindex: ' + score);
+                        }
+                    });
+                    refreshZeitpunkt1LayerControl(parseInt(timeRange.value, 10));
+                    console.log('Elsass 1871 GeoJSON geladen');
+                })
+                .catch(error => console.error('Fehler beim Laden der Elsass-1871-Daten:', error));
+
+            // -----------------------------------------------------------------
+            // Darstellung für Deutsches Reich 1871 (Zeitpunkt 1)
+            // Darstellung mit Pop-Ups zu Name und Stimmungsindex
+            // -----------------------------------------------------------------
+            fetch('DeutschesReich_1871.geojson')
+                .then(response => response.json())
+                .then(data => {
+                    deutschesReich1871Layer = L.geoJSON(data, {
+                        style: getNeutralFeatureStyle(),
+                        onEachFeature: (feature, layer) => {
+                            // Name und Stimmungsindex ermitteln
+                            const name = feature?.properties?.GEN || 'Unbekannt';
+                            const score = feature?.properties?.Stimmungsindex ?? 'k.A.';
+                            layer.bindPopup('<strong>' + name + '</strong><br>Stimmungsindex: ' + score);
+                        }
+                    });
+                    refreshZeitpunkt1LayerControl(parseInt(timeRange.value, 10));
+                    console.log('Deutsches Reich 1871 GeoJSON geladen');
+                })
+                .catch(error => console.error('Fehler beim Laden der Deutsches-Reich-1871-Daten:', error));
+
+            // -----------------------------------------------------------------
+            // Darstellung für Deutsches Reich 1900 (Zeitpunkt 2)
+            // Neutrale Darstellung
+            // -----------------------------------------------------------------
+            fetch('DeutschesReich_1900.geojson')
+                .then(response => response.json())
+                .then(data => {
+                    deutschesReich1900Layer = L.geoJSON(data, {
+                        style: {
+                            color: '#a4a8aa',
+                            weight: 0.5,
+                            opacity: 1,
+                            fillColor: '#FFFFFF',
+                            fillOpacity: 0.5
+                        }
+                    }).addTo(map);
+                    refreshZeitpunkt2Layers(parseInt(timeRange.value, 10));
+                    if (rheinLayer) rheinLayer.bringToFront();
+                    console.log('Deutsches Reich 1900 GeoJSON geladen');
+                })
+                .catch(error => console.error('Fehler beim Laden der Deutsches-Reich-1900-Daten:', error));
+
+            // -----------------------------------------------------------------
+            // Darstellung für Elsass-Lothringen 1900 (Zeitpunkt 2)
+            // Neutrale Darstellung
+            // -----------------------------------------------------------------
+            fetch('Elsass_Lothringen_1900.geojson')
+                .then(response => response.json())
+                .then(data => {
+                    elsassLothringen1900Layer = L.geoJSON(data, {
+                        style: {
+                            color: '#a4a8aa',
+                            weight: 0.5,
+                            opacity: 1,
+                            fillColor: '#FFFFFF',
+                            fillOpacity: 0.5
+                        }
+                    }).addTo(map);
+                    refreshZeitpunkt2Layers(parseInt(timeRange.value, 10));
+                    if (rheinLayer) rheinLayer.bringToFront();
+                    console.log('Elsass-Lothringen 1900 GeoJSON geladen');
+                })
+                .catch(error => console.error('Fehler beim Laden der Elsass-Lothringen-1900-Daten:', error));
+
+            // -----------------------------------------------------------------
+            // Neue Staatsgrenze (Zeitpunkt 1 und 2)
+            // Darstellung der historischen Grenzlinie
+            // -----------------------------------------------------------------
+            fetch('Grenze_1900.geojson')
+                .then(response => response.json())
+                .then(data => {
+                    grenze1900Layer = L.geoJSON(data, {
+                        style: {
+                            color: '#555555',
+                            weight: 2.5,
+                            opacity: 1
+                        }
+                    }).addTo(map);
+                    refreshZeitpunkt2Layers(parseInt(timeRange.value, 10));
+                    if (rheinLayer) rheinLayer.bringToFront();
+                    console.log('Grenze 1900 GeoJSON geladen');
+                })
+                .catch(error => console.error('Fehler beim Laden der Grenze-1900-Daten:', error));
+
+            // -----------------------------------------------------------------
+            // Grenzbahnhöfe (Zeitpunkt 2)
+            // Bahnhöfe werden mit Markern dargestellt; farbliche Unterteilung nach Kategorie
+            // -----------------------------------------------------------------
+            fetch('grenzbahnhoefe_1900.geojson')
+                .then(response => response.json())
+                .then(data => {
+                    grenzbahnhoefe1900Layer = L.geoJSON(data, {
+                        pointToLayer: function (feature, latlng) {
+                            // Eigenschaften des Pointfeatures auslesen
+                            const properties = feature?.properties || {};
+                            const name = properties.Name || 'Unbekannt';
+
+                            // Kategorisierung der Bahnhöfe
+                            const categoryValue = feature?.properties?.Kategorie ?? feature?.properties?.kategorie ?? '';
+                            const category = String(categoryValue).trim().toLowerCase();
+                            const categoryLabel = properties.Kategorie || properties.kategorie || 'Unbekannt';
+
+                            // Informationstext
+                            const funktion = properties.Funktion || 'Keine Zusatzinformation verfügbar';
+
+                            // Darstellung nach Kategorie
+                            let markerFillColor = '#A80000';
+                            if (category === 'grenzbahnhof') {
+                                markerFillColor = '#66c2a4';
+                            } else if (category === 'verkehrszentrum') {
+                                markerFillColor = '#A80000';
+                            }
+
+                            const marker = L.circleMarker(latlng, {
+                                radius: 5,
+                                fillColor: markerFillColor,
+                                color: markerFillColor,
+                                weight: 0,
+                                opacity: 1,
+                                fillOpacity: 0.85
+                            });
+
+                            // Pop-Up mit Zusatzinformationen zum Bahnhof
+                            marker.bindPopup(
+                                '<strong style="font-size:14px">' + name + '</strong><br>' +
+                                '<strong>' + categoryLabel + '</strong> ' + '<br>' +
+                                '<strong>Funktion:</strong> ' + funktion
+                            );
+
+                            return marker;
+                        }
+                    }).addTo(map);
+                    refreshZeitpunkt2Layers(parseInt(timeRange.value, 10));
+                    if (rheinLayer) rheinLayer.bringToFront();
+                    console.log('Grenzbahnhöfe 1900 GeoJSON geladen');
+                })
+                .catch(error => console.error('Fehler beim Laden der Grenzbahnhöfe-1900-Daten:', error));
+
+            // -----------------------------------------------------------------
+            // Bahnnetz (Zeitpunkt 2)
+            // Generalisierte Darstellung des Bahnnetzes um 1900
+            // -----------------------------------------------------------------
+            fetch('Bahnnetz.geojson')
+                .then(response => response.json())
+                .then(data => {
+                    bahnnetzLayer = L.geoJSON(data, {
+                        style: {
+                            color: '#888888',
+                            weight: 1.5,
+                            opacity: 0.6
+                        }
+                    }).addTo(map);
+                    refreshZeitpunkt2Layers(parseInt(timeRange.value, 10));
+                    if (rheinLayer) rheinLayer.bringToFront();
+                    console.log('Bahnnetz GeoJSON geladen');
+                })
+                .catch(error => console.error('Fehler beim Laden der Bahnnetz-Daten:', error));
+
+            // -----------------------------------------------------------------
+            // Rhein (alle Zeitpunkte)
+            // Ist in der Hierachie ganz oben und wird immer dargestellt -> Orientierungspunkt in der Karte
+            // -----------------------------------------------------------------
+            fetch('rhein.geojson')
+                .then(response => response.json())
+                .then(data => {
+                    rheinLayer = L.geoJSON(data, {
+                        style: {
+                            color: '#1C86EE',
+                            weight: 3.0,
+                            opacity: 0.8
+                        }
+                    }).addTo(map);
+                    rheinLayer.bringToFront(); // Immer ganz oben
+
+                    // Anzeige für den aktuellen Zeitpunkt initialisieren
+                    refreshZeitpunkt1LayerControl(parseInt(timeRange.value, 10));
+                    refreshZeitpunkt2Layers(parseInt(timeRange.value, 10));
+                    refreshZeitpunkt3LayerControl(parseInt(timeRange.value, 10));
+                    refreshZeitpunkt1InfoBox(parseInt(timeRange.value, 10));
+                    refreshZeitpunkt2InfoBox(parseInt(timeRange.value, 10));
+                    refreshZeitpunkt3InfoBox(parseInt(timeRange.value, 10));
+                    refreshZeitpunkt1Legend(parseInt(timeRange.value, 10));
+                    refreshZeitpunkt2Legend(parseInt(timeRange.value, 10));
+                    refreshZeitpunkt3Legend(parseInt(timeRange.value, 10));
+                    console.log('Rhein GeoJSON geladen');
+                })
+                .catch(error => console.error('Fehler beim Laden der Rhein-Daten:', error));
+
+            // -----------------------------------------------------------------
+            // Oberrheingraben (Zeitpunkt 3 / Kooperationsachsen)
+            // Darstellung als transparente Fläche 
+            // -----------------------------------------------------------------
+            fetch('Oberrheingraben.geojson')
+                .then(response => response.json())
+                .then(data => {
+                    oberrheingrabenLayer = L.geoJSON(data, {
+                        interactive: false,
+                        style: {
+                            color: '#fe9929',
+                            weight: 0,
+                            opacity: 0,
+                            fillColor: '#fe9929',
+                            fillOpacity: 0.25
+                        }
+                    });
+                    refreshZeitpunkt3LayerControl(parseInt(timeRange.value, 10));
+                    console.log('Oberrheingraben GeoJSON geladen');
+                })
+                .catch(error => console.error('Fehler beim Laden der Oberrheingraben-Daten:', error));
+
+            // -----------------------------------------------------------------
+            // SaarLorLux-Region (Zeitpunkt 3 / Kooperationsachsen)
+            // Darstellung als transparente Fläche
+            // -----------------------------------------------------------------
+            fetch('SaarLorLux_Region.geojson')
+                .then(response => response.json())
+                .then(data => {
+                    saarLorLuxLayer = L.geoJSON(data, {
+                        interactive: false,
+                        filter: function (feature) {
+                            // relevante Teilräume herausfiltern
+                            var entity = (feature.properties && feature.properties.de_entity) || '';
+                            var region = (feature.properties && feature.properties.region) || '';
+                            if (region === 'SL') return entity === 'Gemeinde';
+                            if (region === 'LUX') return entity === 'Kanton';
+                            if (region === 'WAL') return entity === 'Gemeinde';
+                            return !region || region === 'null';
+                        },
+                        style: {
+                            color: '#fb6a4a',
+                            weight: 0,
+                            opacity: 0,
+                            fillColor: '#fb6a4a',
+                            fillOpacity: 0.25
+                        }
+                    });
+                    refreshZeitpunkt3LayerControl(parseInt(timeRange.value, 10));
+                    console.log('SaarLorLux Region GeoJSON geladen');
+                })
+                .catch(error => console.error('Fehler beim Laden der SaarLorLux-Daten:', error));
+        }
+
+        //----------------------------------------------------------------------
+        // Initialisierung: Die Layer werden geladen und die Anzeige für den Startzeitpunkt wird auf 1871 gesetzt
+        //----------------------------------------------------------------------
+        loadLayers();
+        loadKoordinatenMarkers();
+    </script>
+</body>
+</html>
